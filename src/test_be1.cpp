@@ -62,6 +62,7 @@
 #include "scan_pdf.h"
 #include "scan_zip.h"
 #include "scan_vcard.h"
+#include "scan_secrets.h"
 #include "scan_vin.h"
 #include "scan_wordlist.h"
 
@@ -1302,4 +1303,112 @@ TEST_CASE("zip_depth_counts_only_zip_recursion", "[scanners]") {
     REQUIRE(zip_depth(pos0_t("0")) == 0);
     REQUIRE(zip_depth(pos0_t("0-ZIP-0")) == 1);
     REQUIRE(zip_depth(pos0_t("0-ZIP-0-GZIP-0-ZIP-0")) == 2);
+}
+
+TEST_CASE("scan_secrets_validators", "[scanners]") {
+    /* AWS access key IDs */
+    REQUIRE( valid_aws_access_key_id("AKIAIOSFODNN7EXAMPLE", 20) );
+    REQUIRE_FALSE( valid_aws_access_key_id("XKIAIOSFODNN7EXAMPLE", 20) ); // unknown prefix
+    REQUIRE_FALSE( valid_aws_access_key_id("AKIAiosfodnn7example", 20) ); // lowercase body
+    REQUIRE_FALSE( valid_aws_access_key_id("AKIAIOSFODNN7EXAMP", 18) );   // wrong length
+
+    /* GitHub tokens */
+    std::string ghp = "ghp_" + std::string(36, 'a');
+    REQUIRE( valid_github_classic_token(ghp.data(), ghp.size()) );
+    std::string ghp_bad_prefix = "gxp_" + std::string(36, 'a');
+    REQUIRE_FALSE( valid_github_classic_token(ghp_bad_prefix.data(), ghp_bad_prefix.size()) );
+
+    std::string pat = "github_pat_" + std::string(82, 'A');
+    REQUIRE( valid_github_fine_grained_token(pat.data(), pat.size()) );
+    REQUIRE_FALSE( valid_github_fine_grained_token(pat.data(), pat.size() - 1) );
+
+    /* Google API key */
+    std::string google = "AIza" + std::string(35, 'A');
+    REQUIRE( valid_google_api_key(google.data(), google.size()) );
+    std::string google_bad = "XIza" + std::string(35, 'A');
+    REQUIRE_FALSE( valid_google_api_key(google_bad.data(), google_bad.size()) );
+
+    /* Stripe key */
+    std::string stripe = "sk_live_" + std::string(24, 'a');
+    REQUIRE( valid_stripe_key(stripe.data(), stripe.size()) );
+    std::string stripe_short = "sk_live_" + std::string(10, 'a');
+    REQUIRE_FALSE( valid_stripe_key(stripe_short.data(), stripe_short.size()) );
+
+    /* Slack token */
+    std::string slack = "xoxb-test-fixture-token-not-a-real-secret-value";
+    REQUIRE( valid_slack_token(slack.data(), slack.size()) );
+    std::string slack_no_dashes = "xoxb-" + std::string(20, 'a'); // body has no dashes
+    REQUIRE_FALSE( valid_slack_token(slack_no_dashes.data(), slack_no_dashes.size()) );
+
+    /* JWT: the classic jwt.io HS256 example */
+    std::string jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                       "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ."
+                       "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    REQUIRE( valid_jwt(jwt.data(), jwt.size()) );
+    std::string not_jwt = "eyJhbGciOiJIUzI1NiJ9.notreallybase64json.signature";
+    REQUIRE_FALSE( valid_jwt(not_jwt.data(), not_jwt.size()) ); // payload doesn't decode to JSON
+}
+
+TEST_CASE("scan_secrets_detects_known_formats", "[scanners]") {
+    std::string ghp = "ghp_" + std::string(36, 'a');
+    std::string pat = "github_pat_" + std::string(82, 'A');
+    std::string google = "AIza" + std::string(35, 'A');
+    std::string stripe = "sk_live_" + std::string(24, 'a');
+    std::string slack = "xoxb-test-fixture-token-not-a-real-secret-value";
+    std::string jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+                       "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ."
+                       "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+
+    std::string text = "aws_access_key_id = AKIAIOSFODNN7EXAMPLE\n"
+                        "github classic: " + ghp + "\n"
+                        "github fine grained: " + pat + "\n"
+                        "google api key: " + google + "\n"
+                        "stripe key: " + stripe + "\n"
+                        "slack token: " + slack + "\n"
+                        "jwt: " + jwt + "\n"
+                        "private key follows\n"
+                        "-----BEGIN RSA PRIVATE KEY-----\n";
+
+    auto *sbufp = new sbuf_t(text.c_str());
+    auto outdir = test_scanner(scan_secrets, sbufp); // deletes sbufp
+    auto secrets_txt = getLines( outdir / "secrets.txt" );
+
+    REQUIRE( requireFeature(secrets_txt, "AKIAIOSFODNN7EXAMPLE") );
+    REQUIRE( requireFeature(secrets_txt, ghp) );
+    REQUIRE( requireFeature(secrets_txt, pat) );
+    REQUIRE( requireFeature(secrets_txt, google) );
+    REQUIRE( requireFeature(secrets_txt, stripe) );
+    REQUIRE( requireFeature(secrets_txt, slack) );
+    REQUIRE( requireFeature(secrets_txt, jwt) );
+    REQUIRE( requireFeature(secrets_txt, "-----BEGIN RSA PRIVATE KEY-----") );
+}
+
+TEST_CASE("scan_secrets_rejects_false_positives", "[scanners]") {
+    std::string text = "not a key: AKIA123\n"
+                        "sk_live_tooShort\n"
+                        "eyJ but not a jwt structure at all, no dots here\n";
+
+    auto *sbufp = new sbuf_t(text.c_str());
+    auto outdir = test_scanner(scan_secrets, sbufp); // deletes sbufp
+    auto secrets_txt = getLines( outdir / "secrets.txt" );
+
+    for (const auto &line : secrets_txt) {
+        REQUIRE( !has(line, "AKIAIOSFODNN7EXAMPLE") );
+        REQUIRE( !has(line, "tooShort") );
+    }
+}
+
+TEST_CASE("scan_secrets_boundary_before_prevents_partial_match", "[scanners]") {
+    /* An AKIA-prefixed candidate immediately preceded by an identifier
+     * character is part of a longer token, not a real AWS key. */
+    std::string text = "XAKIAIOSFODNN7EXAMPLE and AKIAIOSFODNN7EXAMPLE";
+    auto *sbufp = new sbuf_t(text.c_str());
+    auto outdir = test_scanner(scan_secrets, sbufp); // deletes sbufp
+    auto secrets_txt = getLines( outdir / "secrets.txt" );
+
+    int count = 0;
+    for (const auto &line : secrets_txt) {
+        if (has(line, "AKIAIOSFODNN7EXAMPLE")) count++;
+    }
+    REQUIRE( count == 1 ); // only the standalone occurrence
 }
