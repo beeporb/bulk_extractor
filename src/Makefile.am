@@ -112,6 +112,7 @@ scanners_builtin = \
 	scan_pdf.cpp scan_pdf.h \
 	scan_rar.cpp \
 	scan_rtti.cpp \
+	scan_secrets.cpp scan_secrets.h \
 	scan_sqlite.cpp \
 	scan_utmp.cpp \
 	scan_vcard.cpp scan_vcard.h \

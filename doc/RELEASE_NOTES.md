@@ -70,6 +70,9 @@ through the project's normal pull-request and CI process.
   ([PR #498](https://github.com/simsong/bulk_extractor/pull/498)).
 - The new VIN scanner extracts and validates vehicle identification numbers
   ([PR #494](https://github.com/simsong/bulk_extractor/pull/494)).
+- The new `secrets` scanner detects leaked credentials, including AWS access
+  key IDs, GitHub personal access tokens, Google API keys, Stripe API keys,
+  Slack tokens, JWTs, and PEM private-key headers.
 - Runtime scanner plug-ins are supported again through a versioned factory
   interface, `-P`, and `BE_PATH`, with an end-to-end integration test
   ([PR #528](https://github.com/simsong/bulk_extractor/pull/528)).
