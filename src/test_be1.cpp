@@ -64,6 +64,7 @@
 #include "scan_vcard.h"
 #include "scan_secrets.h"
 #include "scan_vin.h"
+#include "scan_wallets.h"
 #include "scan_wordlist.h"
 
 #include "test_be.h"
@@ -1411,4 +1412,138 @@ TEST_CASE("scan_secrets_boundary_before_prevents_partial_match", "[scanners]") {
         if (has(line, "AKIAIOSFODNN7EXAMPLE")) count++;
     }
     REQUIRE( count == 1 ); // only the standalone occurrence
+}
+
+TEST_CASE("scan_wallets_validators_base58check", "[scanners]") {
+    // Real Bitcoin addresses (the "genesis" P2PKH address, and a well-known P2SH example).
+    std::string type;
+    REQUIRE( valid_base58check_wallet("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", 34, type) );
+    REQUIRE( type == "bitcoin_p2pkh" );
+    REQUIRE( valid_base58check_wallet("339yBhWwk9CAckgVPUM3dhzXADikG51B78", 34, type) );
+    REQUIRE( type == "bitcoin_p2sh" );
+
+    // Same hash160 payload, encoded with each altcoin's version byte.
+    REQUIRE( valid_base58check_wallet("LLguXNLLGu7qnPgDSWfkV6hMDuoJnnMNHe", 34, type) );
+    REQUIRE( type == "litecoin_p2pkh" );
+    REQUIRE( valid_base58check_wallet("M9N7VavuhG3bRFxPVMLPTMEvUvKCEobVUh", 34, type) );
+    REQUIRE( type == "litecoin_p2sh" );
+    REQUIRE( valid_base58check_wallet("D6c3oQy9Ven54bAezxg1kqoBtqAL3XHKvi", 34, type) );
+    REQUIRE( type == "dogecoin_p2pkh" );
+    REQUIRE( valid_base58check_wallet("Xc9o6QgQ9x6NgXae8Fzg4cKNr31ikC3n7c", 34, type) );
+    REQUIRE( type == "dash_p2pkh" );
+    REQUIRE( valid_base58check_wallet("TBSAGDQELxzjgm3greLAjEKivVBLw7yNn3", 34, type) );
+    REQUIRE( type == "tron" );
+    REQUIRE( valid_base58check_wallet("t1KLZGVSeAZfP8E2xCoVaLtjWGMd7VUJbFg", 35, type) );
+    REQUIRE( type == "zcash_t1" );
+
+    // A single flipped character must break the SHA256d checksum.
+    REQUIRE_FALSE( valid_base58check_wallet("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNb", 34, type) );
+    REQUIRE_FALSE( valid_base58check_wallet("not a valid base58check address!!", 34, type) );
+}
+
+TEST_CASE("scan_wallets_validators_ripple", "[scanners]") {
+    // XRP's well-known all-zero "ACCOUNT_ZERO".
+    REQUIRE( valid_ripple_address("rrrrrrrrrrrrrrrrrrrrrhoLvTp", 27) );
+    REQUIRE_FALSE( valid_ripple_address("rrrrrrrrrrrrrrrrrrrrrhoLvTq", 27) ); // bad checksum
+    REQUIRE_FALSE( valid_ripple_address("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa", 34) ); // wrong alphabet/prefix
+}
+
+TEST_CASE("scan_wallets_validators_evm", "[scanners]") {
+    bool checksum_verified;
+    // Uniformly-cased addresses are format-valid but unverified.
+    REQUIRE( valid_evm_address("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed", 42, checksum_verified) );
+    REQUIRE_FALSE( checksum_verified );
+
+    // The canonical EIP-55 worked examples must verify.
+    static const char *eip55[] = {
+        "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+        "0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359",
+        "0xdbF03B407c01E7cD3CBea99509d93f8DDDC8C6FB",
+        "0xD1220A0cf47c7B9Be7A2E6BA89F429762e7b9aDb",
+        nullptr
+    };
+    for (int i = 0; eip55[i]; i++) {
+        REQUIRE( valid_evm_address(eip55[i], 42, checksum_verified) );
+        REQUIRE( checksum_verified );
+    }
+
+    // Flipping the case of one letter must break the EIP-55 checksum.
+    REQUIRE_FALSE( valid_evm_address("0x5aAEb6053F3E94C9b9A09f33669435E7Ef1BeAed", 42, checksum_verified) );
+
+    REQUIRE_FALSE( valid_evm_address("0xnothex0000000000000000000000000000000000", 42, checksum_verified) );
+    REQUIRE_FALSE( valid_evm_address("0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeA", 40, checksum_verified) ); // short
+}
+
+TEST_CASE("scan_wallets_validators_monero", "[scanners]") {
+    // The well-known Monero project donation address.
+    std::string type;
+    std::string donation = "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A";
+    REQUIRE( valid_monero_address(donation.data(), donation.size(), type) );
+    REQUIRE( type == "monero_standard" );
+
+    std::string corrupted = donation;
+    corrupted.back() = (corrupted.back() == 'A') ? 'B' : 'A';
+    REQUIRE_FALSE( valid_monero_address(corrupted.data(), corrupted.size(), type) );
+}
+
+TEST_CASE("scan_wallets_validators_bech32", "[scanners]") {
+    std::string type;
+    // BIP-173's real-world P2WPKH (SegWit v0) example address.
+    std::string segwit = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    REQUIRE( valid_segwit_address(segwit.data(), segwit.size(), type) );
+    REQUIRE( type == "bitcoin_segwit" );
+
+    std::string corrupted = segwit;
+    corrupted.back() = (corrupted.back() == 't') ? 'x' : 't';
+    REQUIRE_FALSE( valid_segwit_address(corrupted.data(), corrupted.size(), type) );
+
+    // Cosmos-SDK-style and Cardano Shelley addresses (plain Bech32, no witness structure).
+    std::string cosmos = "cosmos1qu2zzt3mfp2kymmu3xt28v9aett7fu07zdqqtu";
+    REQUIRE( valid_generic_bech32_address(cosmos.data(), cosmos.size(), type) );
+    REQUIRE( type == "cosmos" );
+
+    std::string cardano = "addr1qv2z2dj8tp5h4zuu4klvlc83qgfjgd2x2a58nz5m4j7uahlsqyfzxdz92enh3zv64w7vmhh0qqgjyv6y24n80zye42as0csh7f";
+    REQUIRE( valid_generic_bech32_address(cardano.data(), cardano.size(), type) );
+    REQUIRE( type == "cardano_shelley" );
+}
+
+TEST_CASE("scan_wallets_detects_known_formats", "[scanners]") {
+    std::string text =
+        "bitcoin: 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa\n"
+        "bitcoin segwit: bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4\n"
+        "litecoin: LLguXNLLGu7qnPgDSWfkV6hMDuoJnnMNHe\n"
+        "ripple: rrrrrrrrrrrrrrrrrrrrrhoLvTp\n"
+        "ethereum (checksummed): 0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed\n"
+        "monero: 44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A\n"
+        "cosmos: cosmos1qu2zzt3mfp2kymmu3xt28v9aett7fu07zdqqtu\n";
+
+    auto *sbufp = new sbuf_t(text.c_str());
+    auto outdir = test_scanner(scan_wallets, sbufp); // deletes sbufp
+    auto wallets_txt = getLines( outdir / "wallets.txt" );
+
+    REQUIRE( requireFeature(wallets_txt, "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa") );
+    REQUIRE( requireFeature(wallets_txt, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4") );
+    REQUIRE( requireFeature(wallets_txt, "LLguXNLLGu7qnPgDSWfkV6hMDuoJnnMNHe") );
+    REQUIRE( requireFeature(wallets_txt, "rrrrrrrrrrrrrrrrrrrrrhoLvTp") );
+    REQUIRE( requireFeature(wallets_txt, "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed") );
+    REQUIRE( requireFeature(wallets_txt, "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A") );
+    REQUIRE( requireFeature(wallets_txt, "cosmos1qu2zzt3mfp2kymmu3xt28v9aett7fu07zdqqtu") );
+}
+
+TEST_CASE("scan_wallets_evm_context_gating", "[scanners]") {
+    // An unverified (uniformly-cased) EVM address needs nearby wallet
+    // context to be reported, since "0x" + 40 hex chars alone is far
+    // too common in hex dumps and source code.
+    std::string padding(200, 'x');
+    std::string no_context = padding + "\n0xabcdef0123456789abcdef0123456789abcdef01\n" + padding;
+    auto *sbufp1 = new sbuf_t(no_context.c_str());
+    auto outdir1 = test_scanner(scan_wallets, sbufp1); // deletes sbufp1
+    auto wallets_txt1 = getLines( outdir1 / "wallets.txt" );
+    REQUIRE_FALSE( requireFeature(wallets_txt1, "0xabcdef0123456789abcdef0123456789abcdef01") );
+
+    std::string with_context = "my ethereum wallet address is 0xabcdef0123456789abcdef0123456789abcdef01";
+    auto *sbufp2 = new sbuf_t(with_context.c_str());
+    auto outdir2 = test_scanner(scan_wallets, sbufp2); // deletes sbufp2
+    auto wallets_txt2 = getLines( outdir2 / "wallets.txt" );
+    REQUIRE( requireFeature(wallets_txt2, "0xabcdef0123456789abcdef0123456789abcdef01") );
 }
