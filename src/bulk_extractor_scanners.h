@@ -57,6 +57,7 @@ SCANNER(secrets)
 SCANNER(sqlite)
 SCANNER(utmp)        // scanner provided by 4n6ist:
 SCANNER(vcard)
+SCANNER(wallets)
 SCANNER(windirs)
 SCANNER(winlnk)
 SCANNER(winpe)

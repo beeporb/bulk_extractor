@@ -117,6 +117,7 @@ scanners_builtin = \
 	scan_utmp.cpp \
 	scan_vcard.cpp scan_vcard.h \
 	scan_vin.cpp scan_vin.h \
+	scan_wallets.cpp scan_wallets.h \
 	scan_windirs.cpp \
 	scan_winlnk.cpp \
 	scan_winpe.cpp \

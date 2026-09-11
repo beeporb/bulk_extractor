@@ -73,6 +73,14 @@ through the project's normal pull-request and CI process.
 - The new `secrets` scanner detects leaked credentials, including AWS access
   key IDs, GitHub personal access tokens, Google API keys, Stripe API keys,
   Slack tokens, JWTs, and PEM private-key headers.
+- The new `wallets` scanner detects cryptocurrency wallet addresses with full
+  checksum validation rather than bare pattern matching: Bitcoin, Litecoin,
+  Dogecoin, Dash, Tron, and Zcash transparent addresses (Base58Check/SHA256d);
+  Ripple classic addresses; Bitcoin/Litecoin native SegWit and Taproot
+  addresses (Bech32/Bech32m); Cosmos-SDK chains and Cardano Shelley addresses
+  (Bech32); Ethereum and other EVM-compatible chain addresses (with EIP-55
+  mixed-case checksum verification); and Monero standard, subaddress, and
+  integrated addresses (CryptoNote Base58 with a Keccak-256 checksum).
 - Runtime scanner plug-ins are supported again through a versioned factory
   interface, `-P`, and `BE_PATH`, with an end-to-end integration test
   ([PR #528](https://github.com/simsong/bulk_extractor/pull/528)).
